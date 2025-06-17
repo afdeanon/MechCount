@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { Upload, FileText, Image, Plus, Search, Filter, Download, Eye, Trash2, Edit3, User, LogOut, Settings } from 'lucide-react';
 
-const AutoCountApp = () => {
+const MechCountApp = () => {
   const [currentUser, setCurrentUser] = useState({ id: 1, email: 'engineer@company.com', name: 'John Engineer' });
   const [projects, setProjects] = useState([
     { id: 1, name: 'Engine Block Analysis', description: 'Analyzing engine components', created_at: '2024-11-15', documents: [] },
@@ -454,4 +454,4 @@ const AutoCountApp = () => {
   );
 };
 
-export default AutoCountApp;
+export default MechCountApp;
