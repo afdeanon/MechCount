@@ -1,7 +1,540 @@
-import React, { useState, useRef, useCallback } from 'react';
-import { Upload, FileText, Image, Plus, Search, Filter, Download, Eye, Trash2, Edit3, User, LogOut, Settings } from 'lucide-react';
+import React, { useState, useRef, useCallback, useEffect, createContext, useContext } from 'react';
+import { Upload, FileText, Image, Plus, Search, Filter, Download, Eye, EyeOff, Mail, Lock, AlertCircle, CheckCircle, Trash2, Edit3, User, LogOut, Settings, Chrome } from 'lucide-react';
 
-const MechCountApp = () => {
+// Authentication Context
+const AuthContext = createContext();
+
+// Mock authentication service (replace with your actual API calls)
+const authService = {
+  // Simulate API delay
+  delay: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
+  
+  // Mock user database
+  users: [
+    { id: 1, email: 'test@example.com', password: 'password123', name: 'Test User', verified: true }
+  ],
+  
+  // Mock login attempts tracking
+  loginAttempts: {},
+  
+  async register(email, password, name) {
+    await this.delay(1000);
+    
+    // Check if user exists
+    const existingUser = this.users.find(u => u.email === email);
+    if (existingUser) {
+      throw new Error('User already exists');
+    }
+    
+    // Create new user
+    const newUser = {
+      id: this.users.length + 1,
+      email,
+      password, // In real app, this would be hashed
+      name,
+      verified: false
+    };
+    
+    this.users.push(newUser);
+    return { success: true, message: 'Registration successful! Please check your email for verification.' };
+  },
+  
+  async login(email, password) {
+    await this.delay(1000);
+    
+    // Check login attempts
+    const attempts = this.loginAttempts[email] || 0;
+    if (attempts >= 3) {
+      throw new Error('Too many failed attempts. Please try again later.');
+    }
+    
+    // Find user
+    const user = this.users.find(u => u.email === email);
+    if (!user || user.password !== password) {
+      this.loginAttempts[email] = attempts + 1;
+      throw new Error('Invalid email or password');
+    }
+    
+    if (!user.verified) {
+      throw new Error('Please verify your email before logging in');
+    }
+    
+    // Reset login attempts on successful login
+    delete this.loginAttempts[email];
+    
+    return {
+      token: `mock-jwt-token-${user.id}`,
+      user: { id: user.id, email: user.email, name: user.name }
+    };
+  },
+  
+  async googleLogin() {
+    await this.delay(1500);
+    // Mock Google OAuth response
+    return {
+      token: 'mock-google-jwt-token',
+      user: { id: 99, email: 'google@example.com', name: 'Google User' }
+    };
+  },
+  
+  async verifyEmail(email) {
+    await this.delay(1000);
+    const user = this.users.find(u => u.email === email);
+    if (user) {
+      user.verified = true;
+      return { success: true };
+    }
+    throw new Error('User not found');
+  },
+  
+  logout() {
+    // Clear session data
+    return { success: true };
+  }
+};
+
+// Auth Provider Component
+function AuthProvider({ children }) {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [sessionTimeout, setSessionTimeout] = useState(null);
+  
+  // Auto logout after 30 minutes of inactivity
+  const resetSessionTimeout = () => {
+    if (sessionTimeout) {
+      clearTimeout(sessionTimeout);
+    }
+    
+    const timeout = setTimeout(() => {
+      logout();
+    }, 30 * 60 * 1000); // 30 minutes
+    
+    setSessionTimeout(timeout);
+  };
+  
+  const login = async (email, password) => {
+    setLoading(true);
+    try {
+      const response = await authService.login(email, password);
+      setUser(response.user);
+      resetSessionTimeout();
+      return response;
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const register = async (email, password, name) => {
+    setLoading(true);
+    try {
+      return await authService.register(email, password, name);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const googleLogin = async () => {
+    setLoading(true);
+    try {
+      const response = await authService.googleLogin();
+      setUser(response.user);
+      resetSessionTimeout();
+      return response;
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const logout = () => {
+    setUser(null);
+    if (sessionTimeout) {
+      clearTimeout(sessionTimeout);
+      setSessionTimeout(null);
+    }
+    authService.logout();
+  };
+  
+  const verifyEmail = async (email) => {
+    return await authService.verifyEmail(email);
+  };
+  
+  // Reset session timeout on user activity
+  useEffect(() => {
+    if (user) {
+      const handleActivity = () => resetSessionTimeout();
+      
+      window.addEventListener('mousedown', handleActivity);
+      window.addEventListener('keydown', handleActivity);
+      window.addEventListener('scroll', handleActivity);
+      
+      return () => {
+        window.removeEventListener('mousedown', handleActivity);
+        window.removeEventListener('keydown', handleActivity);
+        window.removeEventListener('scroll', handleActivity);
+      };
+    }
+  }, [user]);
+  
+  return (
+    <AuthContext.Provider value={{
+      user,
+      login,
+      register,
+      googleLogin,
+      logout,
+      verifyEmail,
+      loading
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+// Hook to use auth context
+function useAuth() {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return context;
+}
+
+// Input Component
+function Input({ icon: Icon, type = 'text', placeholder, value, onChange, error, ...props }) {
+  const [showPassword, setShowPassword] = useState(false);
+  const inputType = type === 'password' && showPassword ? 'text' : type;
+  
+  return (
+    <div className="relative">
+      <div className="relative">
+        {Icon && (
+          <Icon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+        )}
+        <input
+          type={inputType}
+          placeholder={placeholder}
+          value={value}
+          onChange={onChange}
+          className={`w-full ${Icon ? 'pl-10' : 'pl-4'} ${type === 'password' ? 'pr-10' : 'pr-4'} py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all ${
+            error ? 'border-red-500' : 'border-gray-300'
+          }`}
+          {...props}
+        />
+        {type === 'password' && (
+          <button
+            type="button"
+            onClick={() => setShowPassword(!showPassword)}
+            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          >
+            {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+          </button>
+        )}
+      </div>
+      {error && (
+        <div className="flex items-center mt-1 text-red-500 text-sm">
+          <AlertCircle className="h-4 w-4 mr-1" />
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Button Component
+function Button({ children, variant = 'primary', loading = false, disabled = false, onClick, ...props }) {
+  const baseClasses = 'w-full py-3 px-4 rounded-lg font-medium transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed';
+  
+  const variants = {
+    primary: 'bg-blue-600 hover:bg-blue-700 text-white focus:ring-blue-500',
+    secondary: 'bg-gray-100 hover:bg-gray-200 text-gray-900 focus:ring-gray-500',
+    google: 'bg-white hover:bg-gray-50 text-gray-900 border border-gray-300 focus:ring-gray-500'
+  };
+  
+  return (
+    <button
+      className={`${baseClasses} ${variants[variant]} ${loading ? 'cursor-wait' : ''}`}
+      disabled={disabled || loading}
+      onClick={onClick}
+      {...props}
+    >
+      {loading ? (
+        <div className="flex items-center justify-center">
+          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-current mr-2"></div>
+          Loading...
+        </div>
+      ) : (
+        children
+      )}
+    </button>
+  );
+}
+
+// Alert Component
+function Alert({ type = 'info', message, onClose }) {
+  const types = {
+    success: 'bg-green-50 border-green-200 text-green-800',
+    error: 'bg-red-50 border-red-200 text-red-800',
+    info: 'bg-blue-50 border-blue-200 text-blue-800'
+  };
+  
+  const icons = {
+    success: CheckCircle,
+    error: AlertCircle,
+    info: AlertCircle
+  };
+  
+  const Icon = icons[type];
+  
+  return (
+    <div className={`border rounded-lg p-4 ${types[type]}`}>
+      <div className="flex items-center">
+        <Icon className="h-5 w-5 mr-2" />
+        <span className="text-sm font-medium">{message}</span>
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="ml-auto text-current hover:opacity-75"
+          >
+            ×
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Auth Form Component
+function AuthForm() {
+  const [mode, setMode] = useState('login'); // 'login', 'register', 'verify'
+  const [formData, setFormData] = useState({
+    email: '',
+    password: '',
+    name: '',
+    confirmPassword: ''
+  });
+  const [errors, setErrors] = useState({});
+  const [alert, setAlert] = useState(null);
+  
+  const { login, register, googleLogin, verifyEmail, loading } = useAuth();
+  
+  const validateForm = () => {
+    const newErrors = {};
+    
+    if (!formData.email) {
+      newErrors.email = 'Email is required';
+    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      newErrors.email = 'Please enter a valid email';
+    }
+    
+    if (!formData.password) {
+      newErrors.password = 'Password is required';
+    } else if (formData.password.length < 6) {
+      newErrors.password = 'Password must be at least 6 characters';
+    }
+    
+    if (mode === 'register') {
+      if (!formData.name) {
+        newErrors.name = 'Name is required';
+      }
+      
+      if (formData.password !== formData.confirmPassword) {
+        newErrors.confirmPassword = 'Passwords do not match';
+      }
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+  
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setAlert(null);
+    
+    if (!validateForm()) return;
+    
+    try {
+      if (mode === 'login') {
+        await login(formData.email, formData.password);
+      } else if (mode === 'register') {
+        const response = await register(formData.email, formData.password, formData.name);
+        setAlert({ type: 'success', message: response.message });
+        setMode('verify');
+      }
+    } catch (error) {
+      setAlert({ type: 'error', message: error.message });
+    }
+  };
+  
+  const handleGoogleLogin = async () => {
+    setAlert(null);
+    try {
+      await googleLogin();
+    } catch (error) {
+      setAlert({ type: 'error', message: error.message });
+    }
+  };
+  
+  const handleVerifyEmail = async () => {
+    try {
+      await verifyEmail(formData.email);
+      setAlert({ type: 'success', message: 'Email verified successfully! You can now log in.' });
+      setMode('login');
+    } catch (error) {
+      setAlert({ type: 'error', message: error.message });
+    }
+  };
+  
+  const handleInputChange = (field) => (e) => {
+    setFormData({ ...formData, [field]: e.target.value });
+    if (errors[field]) {
+      setErrors({ ...errors, [field]: '' });
+    }
+  };
+  
+  if (mode === 'verify') {
+    return (
+      <div className="text-center">
+        <div className="mb-6">
+          <Mail className="h-12 w-12 text-blue-600 mx-auto mb-4" />
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Verify Your Email</h2>
+          <p className="text-gray-600">
+            We've sent a verification link to <strong>{formData.email}</strong>
+          </p>
+        </div>
+        
+        {alert && (
+          <div className="mb-4">
+            <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />
+          </div>
+        )}
+        
+        <div className="space-y-4">
+          <Button onClick={handleVerifyEmail} loading={loading}>
+            Verify Email (Demo)
+          </Button>
+          
+          <button
+            onClick={() => setMode('login')}
+            className="text-blue-600 hover:text-blue-700 text-sm"
+          >
+            Back to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
+  
+  return (
+    <div>
+      <div className="text-center mb-8">
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          {mode === 'login' ? 'Welcome Back' : 'Create Account'}
+        </h1>
+        <p className="text-gray-600">
+          {mode === 'login' 
+            ? 'Sign in to your account to continue' 
+            : 'Join us today and get started'
+          }
+        </p>
+      </div>
+      
+      {alert && (
+        <div className="mb-6">
+          <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />
+        </div>
+      )}
+      
+      <div className="space-y-4">
+        {mode === 'register' && (
+          <Input
+            icon={User}
+            type="text"
+            placeholder="Full Name"
+            value={formData.name}
+            onChange={handleInputChange('name')}
+            error={errors.name}
+          />
+        )}
+        
+        <Input
+          icon={Mail}
+          type="email"
+          placeholder="Email Address"
+          value={formData.email}
+          onChange={handleInputChange('email')}
+          error={errors.email}
+        />
+        
+        <Input
+          icon={Lock}
+          type="password"
+          placeholder="Password"
+          value={formData.password}
+          onChange={handleInputChange('password')}
+          error={errors.password}
+        />
+        
+        {mode === 'register' && (
+          <Input
+            icon={Lock}
+            type="password"
+            placeholder="Confirm Password"
+            value={formData.confirmPassword}
+            onChange={handleInputChange('confirmPassword')}
+            error={errors.confirmPassword}
+          />
+        )}
+        
+        <Button type="button" onClick={handleSubmit} loading={loading}>
+          {mode === 'login' ? 'Sign In' : 'Create Account'}
+        </Button>
+      </div>
+      
+      <div className="mt-6">
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-gray-300" />
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="px-2 bg-white text-gray-500">Or continue with</span>
+          </div>
+        </div>
+        
+        <div className="mt-6">
+          <Button variant="google" onClick={handleGoogleLogin} loading={loading}>
+            <div className="flex items-center justify-center">
+              <Chrome className="h-5 w-5 mr-2" />
+              Google
+            </div>
+          </Button>
+        </div>
+      </div>
+      
+      <div className="mt-6 text-center">
+        <button
+          onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
+          className="text-blue-600 hover:text-blue-700 text-sm"
+        >
+          {mode === 'login' 
+            ? "Don't have an account? Sign up" 
+            : "Already have an account? Sign in"
+          }
+        </button>
+      </div>
+      
+      {mode === 'login' && (
+        <div className="mt-4 text-center">
+          <p className="text-xs text-gray-500">
+            Demo credentials: test@example.com / password123
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MechCountApp () {
+  const { user, logout } = useAuth();
   const [currentUser, setCurrentUser] = useState({ id: 1, email: 'engineer@company.com', name: 'John Engineer' });
   const [projects, setProjects] = useState([
     { id: 1, name: 'Engine Block Analysis', description: 'Analyzing engine components', created_at: '2024-11-15', documents: [] },
@@ -454,4 +987,30 @@ const MechCountApp = () => {
   );
 };
 
-export default MechCountApp;
+export default function MainApp(){
+  return (
+    <AuthProvider>
+      <AuthScreen />
+    </AuthProvider>
+  );
+};
+
+function AuthScreen() {
+  const { user } = useAuth();
+  
+  // If user is authenticated, show main app
+  if (user) {
+    return <MechCountApp />;
+  }
+  
+  // Otherwise show auth form
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-md w-full space-y-8">
+        <div className="bg-white rounded-2xl shadow-xl p-8">
+          <AuthForm />
+        </div>
+      </div>
+    </div>
+  );
+}
